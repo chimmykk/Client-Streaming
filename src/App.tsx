@@ -20,6 +20,7 @@ const App = ({ channel, uid }: { channel: any; uid: string }) => {
         uid: peerId.uid,
       });
     };
+    // changes
 
     if (channel) {
       channel.on('ChannelMessage', handleChannelMessage);
