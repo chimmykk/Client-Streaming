@@ -1,142 +1,190 @@
-import React from "react";
-import { useState } from "react";
-import AgoraUIKit, { type PropsInterface, layout } from "agora-react-uikit";
+import React, { useState, useEffect, useRef } from 'react';
+import AgoraUIKit, { PropsInterface, layout } from 'agora-react-uikit';
+import AgoraRTM from 'agora-rtm-sdk';
+import { v4 as uuidv4 } from 'uuid';
+const APP_ID = 'c4d6e23287ed4da6b6831383945f9ed2';
+const generateRandomChannelName = () => {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+  let result = '';
+  const fixedLength = 7;
+  for (let i = 0; i < fixedLength; i++) {
+    const randomChar = alphabet[Math.floor(Math.random() * alphabet.length)];
+    result += randomChar;
+  }
+  return result;
+};
+const sendChannelNameToServer = async (channelName: string) => {
+  try {
+    const response = await fetch('http://localhost:3004', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ channelName }),
+    });
 
+    return response; // Return the response object
+  } catch (error) {
+    console.error('Error sending channel name:', error);
+    throw new Error('Failed to send channel name.');
+  }
+};
 
+const App = ({ channel, uid }: { channel: any; uid: string }) => {
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<{ text: string; uid: any }[]>([]);
+  const [text, setText] = useState('');
 
-const App: React.FunctionComponent = () => {
-  const [videocall, setVideocall] = useState(true);
-  const [isHost, setHost] = useState(false);
-  const [isPinned, setPinned] = useState(false);
+  const appendMessage = (message: { text: string; uid: any }) => {
+    setMessages((messages) => [...messages, message]);
+  };
 
-  const props: PropsInterface = {
-    rtcProps: {
-      appId: "c4d6e23287ed4da6b6831383945f9ed2",
-      channel: "test",
-      role: isHost ? "host" : "audience",
-      layout: isPinned ? layout.pin : layout.grid,
-    },
-    callbacks: {
-      EndCall: () => setVideocall(false),
-    },
-    styleProps: {
-      localBtnContainer: { backgroundColor: "blue" },
-    },
+  useEffect(() => {
+    const handleChannelMessage = (message: any, peerId: any) => {
+      appendMessage({
+        text: message.text,
+        uid: peerId.uid,
+      });
+    };
+
+    if (channel) {
+      channel.on('ChannelMessage', handleChannelMessage);
+    }
+
+    return () => {
+      if (channel) {
+        channel.off('ChannelMessage', handleChannelMessage);
+      }
+    };
+  }, [channel]);
+
+  useEffect(() => {
+    if (messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const sendMessage = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (text === '') return;
+    channel.sendMessage({ text, type: 'text' });
+    appendMessage({
+      text: text,
+      uid: uid,
+    });
+    setText('');
   };
 
   return (
-    <div style={styles.container}>
-      {videocall ? (
+    <div className="panel">
+      <div className="messages" ref={messagesRef}>
+        <div className="inner">
+          {messages.map((message, idx) => (
+            <div key={idx} className="message">
+              {message.uid === uid && (
+                <div className="user-self">
+                  You:&nbsp;
+                </div>
+              )}
+              {message.uid !== uid && (
+                <div className="user-them">
+                  Them:&nbsp;
+                </div>
+              )}
+              <div className="text">{message.text}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={sendMessage}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Type your message"
+        />
+        <button>+</button>
+      </form>
+    </div>
+  );
+};
+
+const StartStream: React.FunctionComponent = () => {
+  const [videocall, setVideocall] = useState(false);
+  const [isPinned, setPinned] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channel, setChannel] = useState<any>(null);
+  const [channelCreated, setChannelCreated] = useState(false);
+  const [uid, setUid] = useState('');
+
+  const props: PropsInterface = {
+    rtcProps: {
+      appId: APP_ID,
+      channel: channelName,
+      role: 'host',
+      layout: isPinned ? layout.pin : layout.grid,
+    },
+    callbacks: {
+      EndCall: () => {
+        setVideocall(false);
+        setChannelCreated(false);
+      },
+    },
+    styleProps: {
+      localBtnContainer: { backgroundColor: 'green' },
+    },
+  };
+
+  const handleCreateChannel = async () => {
+    const client = AgoraRTM.createInstance(APP_ID);
+    const newUid = uuidv4();
+    const newChannelName = generateRandomChannelName();
+
+    try {
+      await client.login({ uid: newUid, token: undefined });
+
+      // Send the channel name to the server
+      const response = await sendChannelNameToServer(newChannelName);
+
+      if (!response.ok) {
+        throw new Error('Failed to send channel name.');
+      }
+
+      const newChannel = client.createChannel(newChannelName);
+      await newChannel.join();
+
+      setChannel(newChannel);
+      setChannelCreated(true);
+      setVideocall(true);
+      setChannelName(newChannelName);
+      setUid(newUid);
+    } catch (error) {
+      console.error('Error creating/joining the channel:', error);
+    }
+  };
+
+  return (
+    <div className="container">
+      {videocall && channelCreated ? (
         <>
-          <h2 style={styles.heading}>
-            You're{" "}
-            <span style={styles.person}>
-              {isHost ? "a host" : "an audience"}
-            </span>
+          <h2 className="heading">
+            You're <span className="person">an Host Now </span>
           </h2>
-           
-            {/* <h2 style={styles.liveStatus}> Live now</h2> */}
-          
-          <section style={styles.videoSection}>
-            <AgoraUIKit
-            rtcProps={props.rtcProps}
-            callbacks={props.callbacks}
-            styleProps={props.styleProps}
-          />
-          <form style={styles.comment}>Add a comment</form>
-</section>
-          <div style={styles.nav}>
-            <button style={styles.btn} onClick={() => setHost(!isHost)}>
-              Change Role
-            </button>
-            <button style={styles.btn} onClick={() => setPinned(!isPinned)}>
+          <AgoraUIKit rtcProps={props.rtcProps} callbacks={props.callbacks} styleProps={props.styleProps} />
+          <App channel={channel} uid={uid} />
+          <div className="nav">
+            <button className="btn" onClick={() => setPinned(!isPinned)}>
               Change Layout
             </button>
           </div>
         </>
       ) : (
-        <button style={styles.solidBtn} onClick={() => setVideocall(true)}>
-          Start Call
+        <button className="" onClick={handleCreateChannel} disabled={channelCreated}>
+          Create Channel with Random
         </button>
       )}
     </div>
   );
 };
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: "grid",
-    backgroundColor: "#007bff22",
-    marginInline: "auto",
-    height: "100vh",
-    gridAutoRows: "auto 1fr auto",
-    maxWidth: 400,
-  },
-
-  // liveStatus: {
-  // color:"white",
-  // display:"flex",
-  // borderRadius:"3px",
-  // marginLeft:"350px",
-  // padding:"8px",
-  // flex:5,
-  // position:"absolute",
-  // marginTop:"30px",
-  // width: "fit-content",
-  // background:"linear-gradient(87deg, #833ab4, #e1366c,#fd1d1d)"
-    
-  // },
-
-
-  
-  comment: {
-    border: "1px solid white",
-    padding: "30px",
-    borderRadius: "30px",
-    position: "absolute",
-    bottom: "65px",
-    marginInline: "10px",
-    color: "white",
-    width: "80%",
-    height:"5px",
-    display: "flex"
-  },
-  heading: { textAlign: "center", fontWeight: 500, fontSize: 20 },
-  person: { fontWeight: "bold" },
-  videoSection: {
-    display: "flex",
-    position: "relative",
-  },
-  videoContainer: {
-    display: "flex",
-    flexDirection: "row",
-    flex: 1,
-  },
-  nav: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 10,
-    padding: 10,
-  },
-  solidBtn: {
-    placeSelf: "center",
-    backgroundColor: "pink",
-    color: "black",
-    outlineColor: "transparent",
-    border: "1px solid white",
-    fontSize: 20,
-    borderRadius: 5,
-    padding: 10
-  },
-  btn: {
-    outlineColor: "transparent",
-    backgroundColor: "pink",
-    borderRadius: 5,
-    flex: 1,
-    padding: 10,
-    color: "black",
-    fontSize: 20,
-  },
-};
-
-export default App;
+export default StartStream;
